@@ -11,17 +11,17 @@ class GNNModel(torch.nn.Module):
         self.hidden_size = hidden_size
         self.num_features = num_features
         self.target_size = target_size
-        self.convs = [torch_geometric.nn.GATConv(self.num_features, self.hidden_size),
-                      torch_geometric.nn.GATConv(self.hidden_size, self.hidden_size)]
+        self.convs = [torch_geometric.nn.GATConv(self.num_features, self.hidden_size,edge_dim=2, heads=1,dropout=0.1)]
         self.linear = nn.Linear(self.hidden_size, self.target_size)
 
     def forward(self, data):
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
-        for conv in self.convs[:-1]:
+        edge_attr = edge_attr.float()
+        for conv in self.convs:
             x = conv(x=x, edge_index=edge_index, edge_attr=edge_attr)
             x = F.tanh(x)
-            x = F.dropout(x, training=self.training)
 
-        x = self.convs[-1](x=x, edge_index=edge_index, edge_attr=edge_attr)
         x = self.linear(x)
+        x = F.tanh(x)
+
         return x

@@ -3,17 +3,11 @@ import os
 import networkx as nx
 os.chdir('..')
 
-graphType = ["SF", "Twitter", "CustomCliqueSizes"]
-size = 1024
-relabel = dict()
-currentGraphType = graphType[2]
-graphFolder = os.listdir(f"./Graphs/{currentGraphType}/{size}/Graph")
-
-for n in range(1,1025):
-    relabel[str(n)] = n-1
+graphType = ["ColourGraphs"]
+currentGraphType = graphType[0]
+graphFolder = os.listdir(f"./Graphs/{currentGraphType}/Graph")
 
 for graphFile in graphFolder:
-    G = nx.read_edgelist(f"./Graphs/{currentGraphType}/{size}/Graph/{graphFile}", create_using=nx.Graph())
-    nx.relabel_nodes(G, relabel, copy=False)
-    nx.write_edgelist(G, f"./Graphs/{currentGraphType}/{size}/Graph/{graphFile}", data=False)
-
+    G = nx.read_edgelist(f"./Graphs/{currentGraphType}/Graph/{graphFile}", create_using=nx.Graph())
+    G2 = nx.convert_node_labels_to_integers(G)
+    nx.write_edgelist(G2, f"./Graphs/ColourGraphs/GraphClean/{graphFile}", data=False)

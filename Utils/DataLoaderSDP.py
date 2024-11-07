@@ -1,8 +1,5 @@
 from abc import ABC
-
-import torch
 from torch_geometric.data import Dataset
-
 
 class DatasetSDP(Dataset, ABC):
 

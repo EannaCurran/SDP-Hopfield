@@ -2,14 +2,24 @@ import numpy as np
 import random
 import math
 from numpy.random import choice
+import torch
+from torch import nn
+import torch.nn.functional as F
 
-# Redifine the convergance criteria.
 
 class HopfieldNetworkCut:
 
     def __init__(self, data, iterations, activationThreshold):
+
         self.numberOfNeurons = data.shape[0]
-        self.weights = data.copy()
+
+        if torch.is_tensor(data):
+            values = torch.clone(data)
+            values = values.detach()
+            self.weights = values.numpy()
+        else:
+            self.weights = data.copy()
+
         self.iterations = iterations
         A = np.random.randint(0, 2, self.numberOfNeurons)
         A[A == 0] = -1
@@ -22,6 +32,7 @@ class HopfieldNetworkCut:
     def train(self):
         for iterate in range(0, self.iterations):
             newIndex = dict()
+
             ''' Asynchronously  update
             update_order = list(range(0,self.numberOfNeurons))
             random.shuffle(update_order)
@@ -30,8 +41,8 @@ class HopfieldNetworkCut:
                 score = np.dot(self.weights[index], self.activation)
                 self.activation[index] = 1 if score > 0 else -1
             '''
-            newActivation = sigmoid_all(self.weights.dot(self.activation))
 
+            newActivation = sigmoid_all(self.weights.dot(self.activation))
             newActivationRound = newActivation.copy()
             newIndex['output'] = newActivation.copy()
             newActivationRound[newActivationRound > 0.5] = 1
@@ -78,14 +89,16 @@ class HopfieldNetworkCut:
         return values * (1-values)
 
 
+
 class HopfieldNetworkClique:
 
     def __init__(self, data, dummyNode, iterations, activationThreshold):
+
         self.numberOfNeurons = data.shape[0]
         self.weights = data.copy()
         self.iterations = iterations
-        A = np.random.randint(0, 2, self.numberOfNeurons)
-        self.activation = A
+        A = np.random.randint(0, 1, self.numberOfNeurons)
+        self.activation = np.zeros(self.numberOfNeurons)
         self.activationProb = A.copy().astype(float)
         self.nonConvergenceCount = 0
         self.activationThreshold = activationThreshold
@@ -133,31 +146,15 @@ class HopfieldNetworkClique:
         for i in reversed(range(len(self.activationHistory) - 1)):
 
             layer = self.activationHistory[i]
-            activations = self.activationHistory[i + 1]['output'].copy()
-            delta = self.transfer_derivative(activations).copy() * error
+            activations = self.activationHistory[i + 1]['output']
+            delta = transfer_derivative(activations) * error
             delta_re = delta.reshape(delta.shape[0], -1).T
 
-            current_activations = self.activationHistory[i]['output'].copy()
+            current_activations = self.activationHistory[i]['output']
             current_activations = current_activations.reshape(current_activations.shape[0], -1)
-            layer['weight error'] = np.clip(np.dot(current_activations, delta_re),-1,1)
-            layer['bias error'] = np.clip(delta,-1,1)
-            error = np.dot(delta, self.weights[i].copy().T)
-
-
-    def transfer_derivative(self, values):
-        return values * (1-values)
-
-    def relu(self, values):
-        return np.maximum(0, values)
-
-def sigmoid_all(x):
-    for n in range(0, len(x)):
-        x[n] = 1 / (1 + math.exp(-x[n]))
-    return x
-
-
-def sigmoid(x):
-    return 1 / (1 + math.exp(-x))
+            layer['weight error'] = np.dot(current_activations, delta_re)
+            layer['bias error'] = delta
+            error = np.dot(delta, self.weights[i].T)
 
 
 class HopfieldNetworkColour:
@@ -212,7 +209,65 @@ class HopfieldNetworkColour:
     def get_weights(self):
         return self.weights
 
+
+class HopfieldNetworkCutTorch(nn.Module):
+
+    def __init__(self, weights, bias=False, max_iter=100):
+        super(HopfieldNetworkCutTorch, self).__init__()
+
+        self.weights = torch.tensor(weights, requires_grad=True)
+        self.max_iter = max_iter
+        self.nonConvergenceCount = 0
+        self.numberOfNeurons = weights.shape[0]
+        A = np.random.randint(0, 2, self.numberOfNeurons)
+        A[A == 0] = -1
+        self.activation = torch.tensor(A).type(torch.DoubleTensor)
+
+        if bias:
+            self.bias = torch.Tensor(bias, requires_grad=True)
+
+    def _train(self):
+        self.forward()
+
+    def forward(self):
+
+        for iterate in range(0, self.max_iter):
+            activationCopy = torch.sigmoid(F.linear(self.activation, self.weights))
+            activationCopy[activationCopy > 0.5] = 1
+            activationCopy[activationCopy <= 0.5] = -1
+            if torch.equal(activationCopy, self.activation) and iterate != 0:
+                self.activation = activationCopy
+                return
+            self.activation = activationCopy
+        return
+
+    def get_partition(self):
+        return self.activation, self.nonConvergenceCount
+
+
 def softmax_vector(x, axis=None):
     x = x - x.max(axis=axis, keepdims=True)
     y = np.exp(x)
     return y / y.sum(axis=axis, keepdims=True)
+
+
+def sigmoid_all(x):
+    for n in range(0, len(x)):
+        x[n] = 1 / (1 + math.exp(-clip(x[n], -0.0000001, 1000000)))
+    return x
+
+
+def clip(val, min_, max_):
+    return min_ if val < min_ else max_ if val > max_ else val
+
+
+def sigmoid(x):
+    return 1 / (1 + math.exp(-x))
+
+
+def relu(values):
+    return np.maximum(0, values)
+
+
+def transfer_derivative(values):
+    return values * (1-values)

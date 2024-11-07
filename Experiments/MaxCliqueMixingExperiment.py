@@ -4,11 +4,10 @@ import os
 import networkx as nx
 import pandas as pd
 import random
-import time
 
 os.chdir('..')
 graphType = ["IMDB-BINARY", "COLLAB", "Twitter", "CustomClique"]
-currentGraphType = graphType[1]
+currentGraphType = graphType[0]
 random.seed(1)
 maxCliqueSizes = dict()
 
@@ -23,27 +22,26 @@ maxCliqueNotFound = 0
 invalidClique = 0
 nonConvergenceCount = 0
 hopCliquesOpt = []
-timeSDP = []
-randomCliqueOpt = []
-for graphFile in graphFolder[0:100]:
 
+randomCliqueOpt = []
+for graphFile in graphFolder:
     G = nx.read_edgelist(f"./Graphs/{currentGraphType}/Graph/{graphFile}", create_using=nx.Graph())
     #G = nx.convert_node_labels_to_integers(G, first_label=0)
-    graphSDP = pd.read_csv(f"./SDPClique/{currentGraphType}/{graphFile}".replace(".txt", ".csv"), header=None)
+    k = nx.number_of_nodes(G)
+    graphSDP = generate_sdp_relaxation_mixing_clique(G, k, 100)
+    graphSDP = pd.DataFrame(graphSDP)
+    graphSDP2 = pd.read_csv(f"./SDPClique/{currentGraphType}/{graphFile}".replace(".txt", ".csv"), header=None)
 
-    #time1 = time.time()
-    #graphSDP = generate_sdp_relaxation_clique(G, graphFile, "./temp")
-    #time2 = time.time()
-    #timeSDP.append(time2-time1)
 
     bestCliqueSize = 0
     bestRandomCliqueSize = 0
+
     cliques = [len(c) for c in nx.find_cliques(G)]
     maxClique = max(cliques)
 
-    for t in range(0, 5):
+    for n in range(0,1):
         processedGraphSCP, dummyNode = process_graph_sdp_clique(graphSDP, G)
-        hopfieldNetwork = HopfieldNetworkClique(processedGraphSCP, dummyNode, 20, 0)
+        hopfieldNetwork = HopfieldNetworkClique(processedGraphSCP, dummyNode, 5, 0)
 
         hopfieldNetwork.train()
         hopfieldPartition, Con = hopfieldNetwork.get_partition()
@@ -54,23 +52,23 @@ for graphFile in graphFolder[0:100]:
             nonConvergenceCount += 1
 
         currentScore = 0
-
         if not check_clique(index, G):
+            invalidClique += 1
+            hopCliquesOpt.append(0)
             currentScore = 0
+
         elif hopfieldCount != maxClique:
+            maxCliqueNotFound += 1
+            hopCliquesOpt.append(hopfieldCount/maxClique)
             currentScore = hopfieldCount/maxClique
         else:
+            hopCliquesOpt.append(1)
             currentScore = 1
 
         if currentScore > bestCliqueSize:
             bestCliqueSize = currentScore
 
-    if bestCliqueSize == 0:
-        invalidClique += 1
-    if bestCliqueSize != 1:
-        maxCliqueNotFound += 1
-
-    for t in range(0, 5):
+    for t in range(0,5):
 
         currentScore = len(greedy_max_clique(G))/maxClique
         if currentScore > bestRandomCliqueSize:
@@ -81,7 +79,6 @@ for graphFile in graphFolder[0:100]:
     print(graphFile)
     print(f"Max Clique Size:{maxClique} Hopfield Opt Gap:{bestCliqueSize} Random Clique Opt Gap:{bestRandomCliqueSize} Graph Nodes:{nx.number_of_nodes(G)}")
 
-print(f"Max Cliques Not Found:{maxCliqueNotFound}  Invalid Cliques Found:{invalidClique/len(graphFolder)} Non Convergence:{nonConvergenceCount}")
+print(f"Max Cliques Not Found:{maxCliqueNotFound}  Invalid Cliques Found:{invalidClique} Non Convergence:{nonConvergenceCount}")
 print(f"Average Clique Opt Ratio: {np.mean(hopCliquesOpt)}+-{np.std(hopCliquesOpt)}")
 print(f"Average Random Clique Opt Ratio: {np.mean(randomCliqueOpt)}+-{np.std(randomCliqueOpt)}")
-#print(f"Time:{np.mean(timeSDP)}+-{np.std(timeSDP)}")

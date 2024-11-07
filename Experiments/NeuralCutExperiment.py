@@ -1,16 +1,18 @@
+
 import copy
 import os
-import random
-import time
+import pandas as pd
+import torch.nn as nn
 import torch.optim as optim
+
 from Utils.hopfield import HopfieldNetworkCut
 from Utils.utils import *
 
-graphType = ["CustomCut", "SF", "Twitter", "512"]
+graphType = ["CustomCut", "SF", "Twitter"]
 currentGraphType = graphType[1]
 os.chdir('..')
-createDataset = True
-device = torch.device('cpu')
+createDataset = False
+device = torch.device('cuda')
 random.seed(1)
 maxCutSizes = dict()
 
@@ -26,17 +28,16 @@ if createDataset:
     graphs = []
 
     for graphFile in graphFolder:
-
         print(graphFile)
-        originalGraph = nx.read_edgelist(f"Graphs/{currentGraphType}/Graph/{graphFile}", create_using=nx.Graph(), nodetype=int)
+        originalGraph = nx.read_edgelist(f"Graphs/{currentGraphType}/Graph/{graphFile}", create_using=nx.Graph(),
+                                         nodetype=int)
         graphSDPValues = pd.read_csv(f"SDPCut/{currentGraphType}/{graphFile}".replace(".txt", ".csv"), header=None)
         graphSDP = nx.complete_graph(nx.number_of_nodes(originalGraph) + 1)
         edgeFeatures = process_graph_sdp_cut_model(graphSDP, originalGraph, graphSDPValues, graphFile)
-
         for currentGraphEdge in edgeFeatures:
             graphs.append(currentGraphEdge)
 
-    df = pd.DataFrame(graphs, columns = ['Graph Name', 'Edge 1', 'Edge 2', 'Xi', 'Xi^2', 'Xi^3', 'Ii'])
+    df = pd.DataFrame(graphs, columns= ['Graph Name', 'Edge 1', 'Edge 2', 'Xi', 'Xi^2', 'Xi^3', 'Ii'])
     df.to_pickle(f'./Dataframe/SDPCut/{currentGraphType}.pkl')
 
 df = pd.read_pickle(f'./Dataframe/SDPCut/{currentGraphType}.pkl')
@@ -51,19 +52,17 @@ model = nn.Sequential(
 )
 
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
-
 torch.nn.init.xavier_uniform_(model[0].weight)
 torch.nn.init.xavier_uniform_(model[2].weight)
 torch.nn.init.xavier_uniform_(model[4].weight)
 
-train = True
+train = False
 
 graphCount = df['Graph Name'].nunique()
 trainSize = int(np.floor(graphCount * 0.7))
 testSize = int(graphCount - trainSize)
 graphNames = list(df['Graph Name'].unique())
 trainGraphs = random.sample(graphNames, trainSize)
-
 testGraphs = [n for n in graphNames if n not in trainGraphs]
 
 trainDf = df[df['Graph Name'].isin(trainGraphs)]
@@ -82,12 +81,12 @@ if train:
 
         print(epoch)
         results = []
-        for graphFile in trainGraphs[0:100]:
+        for graphFile in trainGraphs[0:700]:
 
             G = nx.read_edgelist(f"./Graphs/{currentGraphType}/Graph/{graphFile}", create_using=nx.Graph())
             graphSDP = pd.read_csv(f"./SDPCut/{currentGraphType}/{graphFile}".replace(".txt", ".csv"), header=None)
             currentGraphDataframe = trainDf.loc[trainDf['Graph Name'] == graphFile]
-            G = nx.convert_node_labels_to_integers(G)
+
             processedGraphSDP, tensorsSDP = process_graph_sdp_cut_model_train(G, model, currentGraphDataframe)
             hopfieldNetwork = HopfieldNetworkCut(processedGraphSDP, 5, 0)
             hopfieldNetwork.train()
@@ -109,24 +108,24 @@ if train:
 
             hopfieldStartingGradients = startingGradients['weight error']
 
+            optimizer.zero_grad()
             norm = (len(tensorsSDP) * (len(tensorsSDP)-1))/2
-            if cutError != 0:
-                for m in range(0, len(tensorsSDP)):
-                     for n in range(m, len(tensorsSDP)):
-                        if n != m:
-                            tensor = tensorsSDP[m][n]
-                            gradient = hopfieldStartingGradients[m][n]
-                            gradient = torch.tensor([[gradient]])
-                            tensor.backward(gradient=gradient/norm)
+
+            for m in range(0, len(tensorsSDP)):
+                 for n in range(m, len(tensorsSDP)):
+                    if n != m:
+                        tensor = tensorsSDP[m][n]
+                        gradient = hopfieldStartingGradients[m][n]
+                        gradient = torch.tensor([[gradient]])
+                        tensor.backward(gradient=gradient/norm)
 
             optimizer.step()
-            optimizer.zero_grad()
 
             print(f"{graphFile.replace('.txt,', '')} Number of Nodes:{nx.number_of_nodes(G)} Hopfield Cut Size:{hopfieldCutSize} Cut Size:{maxCutSize} Opt Ratio:{hopfieldCutSize/maxCutSize} Non-convergence Count:{nonConvergenceCount}")
 
         print(f"Average Ratio:{np.mean(results)}")
 
-        with open("./results.txt", "a") as myfile:
+        with open("./result.txt", "a") as myfile:
             myfile.write(f"{np.mean(results)}\n")
 
         if np.mean(results) > best_ratio:
@@ -134,28 +133,24 @@ if train:
             best_ratio = np.mean(results)
 
     model.load_state_dict(best_weights)
-    torch.save(model.state_dict(), f'./Models/MaxCut/{currentGraphType}_Model_final.pt')
+    #torch.save(model.state_dict(), f'./Models/MaxCut/{currentGraphType}23_Model.pt')
 
 else:
-    executionTimes = []
     results = []
     nonConvergenceCount = 0
-    model.load_state_dict(torch.load(f'./Models/MaxCut/SF_Model2.pt'))
+    model.load_state_dict(torch.load(f'./Models/MaxCut/{currentGraphType}23_Model.pt'))
     model.eval()
 
     for graphFile in testGraphs[0:300]:
 
         G = nx.read_edgelist(f"./Graphs/{currentGraphType}/Graph/{graphFile}", create_using=nx.Graph())
+        graphSDP = pd.read_csv(f"./SDPCut/{currentGraphType}/{graphFile}".replace(".txt", ".csv"), header=None)
         currentGraphDataframe = testDf.loc[testDf['Graph Name'] == graphFile]
-        startTime = time.time()
+
         processedGraphSDP, tensorsSDP = process_graph_sdp_cut_model_train(G, model, currentGraphDataframe)
         hopfieldNetwork = HopfieldNetworkCut(processedGraphSDP, 10, 0)
         hopfieldNetwork.train()
-        endTime = time.time()
-
-        executionTime = endTime - startTime
         hopfieldCut, Con = hopfieldNetwork.get_partition()
-        executionTimes.append(executionTime)
         hopfieldCutSize = 0
 
         for edge in G.edges():
@@ -169,6 +164,4 @@ else:
         results.append(hopfieldCutSize / maxCutSize)
         print(f"{graphFile.replace('.txt,', '')} Number of Nodes:{nx.number_of_nodes(G)} Hopfield Cut Size:{hopfieldCutSize} Cut Size:{maxCutSize} Opt Ratio:{hopfieldCutSize / maxCutSize} Non-convergence Count:{nonConvergenceCount}")
 
-    print(f"Average Ratio for Test Set:{np.mean(results)}+-{np.std(results)}")
-    print(f"Average runtime for Hopfield:{np.mean(executionTimes)}+-{np.std(executionTimes)}")
-
+    print(f"Average Ratio for Test Set:{np.mean(results)}")

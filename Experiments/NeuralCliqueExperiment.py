@@ -1,4 +1,5 @@
 import copy
+
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from torch import optim, nn
@@ -13,7 +14,7 @@ import random
 
 os.chdir('..')
 graphType = ["IMDB-BINARY", "COLLAB", "Twitter", "CustomClique"]
-currentGraphType = graphType[3]
+currentGraphType = graphType[0]
 random.seed(1)
 maxCliqueSizes = dict()
 createDataset = False
@@ -61,7 +62,7 @@ model = nn.Sequential(
 )
 
 lossFn = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
 train = False
 
